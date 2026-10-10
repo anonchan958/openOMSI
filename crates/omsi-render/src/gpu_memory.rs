@@ -183,6 +183,27 @@ pub(super) fn lighter_picture(info: &wgpu::AdapterInfo, vram: Option<u64>, optio
     }
 }
 
+/// Conservative texture allowance in MB, distinct from physical VRAM.
+pub(super) fn texture_allowance_mb(info: &wgpu::AdapterInfo, vram: Option<u64>, budget: Option<u64>) -> u64 {
+	let discrete_allowance = |fallback| {
+		vram.filter(|v| *v >= 512).map_or(fallback, |v| {
+			if v <= 2560 { v * 35 / 100 }
+			else if v <= 6144 { (v / 2).min(1600) }
+			else { v * 3 / 10 }
+		})
+	};
+	match info.device_type {
+		wgpu::DeviceType::DiscreteGpu => discrete_allowance(1600),
+		wgpu::DeviceType::IntegratedGpu if info.backend == wgpu::Backend::Metal => 3000,
+		// (an APU takes its memory from the system, and its driver tells how much it will
+		// really hand out: 1 GB was a guess for the phones that report nothing, and on a
+		// desktop APU with 10 GB of budget it keeps a modded bus's 4k livery on its low
+		// mip levels - 3/10 of the budget, as for a big discrete card)
+		wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu => budget.filter(|b| *b >= 2_600).map_or(1000, |b| (b * 3 / 10).min(4_000)),
+		_ => discrete_allowance(800),
+	}
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::{picture, Picture};
